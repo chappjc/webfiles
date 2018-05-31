@@ -1,0 +1,9 @@
+.vscode/
+vendor/
+*.bak
+.idea/
+debug
+*.exe
+*.exe~
+*.test
+*.out
