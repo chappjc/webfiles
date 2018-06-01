@@ -20,6 +20,5 @@ func (s *Server) WithSession(next http.Handler) http.Handler {
 		}
 		ctx := context.WithValue(r.Context(), middleware.CtxSession, session)
 		next.ServeHTTP(w, r.WithContext(ctx))
-		return
 	})
 }

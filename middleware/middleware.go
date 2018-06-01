@@ -61,7 +61,7 @@ func CheckAuth(key string) func(http.Handler) http.Handler {
 				userName := claims["name"]
 				fmt.Print(userName)
 				ctx := context.WithValue(r.Context(), CtxAuthed, true)
-				ctx = context.WithValue(r.Context(), CtxUser, userName)
+				ctx = context.WithValue(ctx, CtxUser, userName)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}

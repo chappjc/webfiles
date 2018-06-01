@@ -38,5 +38,6 @@ func WriteJSON(w http.ResponseWriter, obj interface{}, indent string) {
 func Error(w http.ResponseWriter, statusCode int, message string) {
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusInternalServerError)
-	io.WriteString(w, message)
+	// write the error message, don't worry if client disappears
+	_, _ = io.WriteString(w, message)
 }
