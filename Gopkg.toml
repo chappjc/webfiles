@@ -1,0 +1,15 @@
+[[constraint]]
+  branch = "master"
+  name = "github.com/chappjc/logrus-prefix"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/shiena/ansicolor"
+
+[[constraint]]
+  name = "github.com/sirupsen/logrus"
+  version = "1.0.5"
+
+[prune]
+  go-tests = true
+  unused-packages = true
