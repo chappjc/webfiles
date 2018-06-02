@@ -9,3 +9,4 @@ debug
 *.test
 *.out
 uploads/
+session_*

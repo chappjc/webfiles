@@ -9,12 +9,6 @@
 
 [[projects]]
   branch = "master"
-  name = "github.com/auth0/go-jwt-middleware"
-  packages = ["."]
-  revision = "5493cabe49f7bfa6e2ec444a09d334d90cd4e2bd"
-
-[[projects]]
-  branch = "master"
   name = "github.com/chappjc/logrus-prefix"
   packages = ["."]
   revision = "3a1d64819adb569fb9952144dd90c0abe92e2822"
@@ -33,6 +27,12 @@
   ]
   revision = "e83ac2304db3c50cf03d96a2fcd39009d458bc35"
   version = "v3.3.2"
+
+[[projects]]
+  name = "github.com/go-chi/jwtauth"
+  packages = ["."]
+  revision = "53a0a4877a0ead48e149be6b4ec9dd1b3c075eba"
+  version = "v3.3.0"
 
 [[projects]]
   name = "github.com/gorilla/context"
@@ -100,6 +100,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "2d82616e00ddd98e0255e41fd922a49b4fac2ff9dddf7cd690b97c493633e3a3"
+  inputs-digest = "ce469fdbee7eb6211c690bde0acbfc09b964efe5252df665acdd5b261030c03c"
   solver-name = "gps-cdcl"
   solver-version = 1

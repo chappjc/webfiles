@@ -4,8 +4,11 @@
 package server
 
 import (
+	"github.com/chappjc/webfiles/middleware"
+
 	"github.com/go-chi/chi"
 	chimw "github.com/go-chi/chi/middleware"
+	"github.com/go-chi/jwtauth"
 	//"github.com/rs/cors"
 )
 
@@ -25,13 +28,22 @@ func NewRouter(server *Server) webMux {
 	// corsMW := cors.Default()
 	// mux.Use(corsMW.Handler)
 
-	// JWT: CheckJWT for each request that uses jwtMW.Handler
-	// jwtMW := middleware.NewJwtMiddleware(server.SigningKey)
+	// Regular cookie session (no JWT embedded)
+	//mux.Use(server.WithSession)
+
+	// Verify JWT from URI query or HTTP (Authorization) header.
+	mux.Use(middleware.JWTVerify(server.AuthToken, jwtauth.TokenFromQuery, jwtauth.TokenFromHeader))
+
+	// Find session cookie "webfilesJWTSession" with JWT data or create a new
+	// token and cookie.
+	mux.Use(server.WithJWTCookie)
+
+	// Verify JWT from cookie
+	mux.Use(middleware.JWTVerify(server.AuthToken, jwtauth.TokenFromCookie))
 
 	mux.Get("/", server.root)
-
-	mux.Get("/file/{fileid}", server.File)
+	mux.Get("/token", server.Token)
 	mux.HandleFunc("/upload", server.UploadFile)
-
+	mux.With(middleware.JWTAuthenticator).Get("/file/{fileid}", server.File)
 	return webMux{mux}
 }

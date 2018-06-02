@@ -6,9 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/shiena/ansicolor"
-	// "github.com/mattn/go-colorable"
 	prefix_fmt "github.com/chappjc/logrus-prefix"
+	"github.com/shiena/ansicolor"
 	"github.com/sirupsen/logrus"
 )
 
@@ -31,8 +30,6 @@ func startLogger() error {
 	logrus.SetOutput(io.MultiWriter(logFILE, os.Stdout))
 	logrus.SetLevel(logrus.DebugLevel)
 	logrus.SetFormatter(&prefix_fmt.TextFormatter{ForceColors: true})
-	//logrus.SetOutput(ansicolor.NewAnsiColorWriter(os.Stdout))
-	//logrus.SetOutput(colorable.NewColorableStdout())
 
 	log = logrus.New()
 	log.Level = logrus.DebugLevel
@@ -42,12 +39,17 @@ func startLogger() error {
 		FullTimestamp:   true,
 		TimestampFormat: "02 Jan 06 15:04.00 -0700",
 	}
-
-	//log.Out = colorable.NewColorableStdout()
-	//log.Out = colorable.NewNonColorable(io.MultiWriter(logFILE, os.Stdout))
 	log.Out = ansicolor.NewAnsiColorWriter(io.MultiWriter(logFILE, os.Stdout))
+	return nil
+}
 
-	log.Debug("webfiles logger started.")
+func setLogLevel(level string) error {
+	Level, err := logrus.ParseLevel(level)
+	if err != nil {
+		return fmt.Errorf("invalid log level: %v", err)
+	}
 
+	logrus.SetLevel(Level)
+	log.Level = Level
 	return nil
 }

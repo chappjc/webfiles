@@ -10,26 +10,58 @@ import (
 	"strings"
 	"time"
 
-	"github.com/auth0/go-jwt-middleware"
 	"github.com/chappjc/webfiles/response"
+
 	"github.com/dgrijalva/jwt-go"
+	"github.com/go-chi/jwtauth"
 	"github.com/sirupsen/logrus"
 )
 
 var log = logrus.New()
 
+// UseLog sets an external logger for use by this package.
 func UseLog(_log *logrus.Logger) {
 	log = _log
 }
 
-type contextKey int
+// JWTAuthenticator allows handers to proceed given a validated token identified
+// via jwtauth.FromContext. This should be used after jwtauth.Verify/Verifier.
+func JWTAuthenticator(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token, claims, err := jwtauth.FromContext(r.Context())
+		if err != nil || token == nil || !token.Valid {
+			http.Error(w, http.StatusText(401), 401)
+			return
+		}
 
-const (
-	CtxToken contextKey = iota
-	CtxUser
-	CtxAuthed
-	CtxSession
-)
+		user := claims["user"]
+		fmt.Println("user: ", user)
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// JWTVerify middleware verifies a JWT from sources defined via the findTokenFns
+// functions. If the jwtauth verification has already been successfully
+// performed for this request, the verifications functions are not run.
+func JWTVerify(ja *jwtauth.JWTAuth, findTokenFns ...func(r *http.Request) string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		hfn := func(w http.ResponseWriter, r *http.Request) {
+			// Skip additional verification if already done
+			token, _, err := jwtauth.FromContext(r.Context())
+			if err == nil && token != nil && token.Valid {
+				next.ServeHTTP(w, r)
+				return
+			}
+			// Perform JWT verfication and store the token and result in the
+			// request context.
+			token, err = jwtauth.VerifyRequest(ja, r, findTokenFns...)
+			ctx := jwtauth.NewContext(r.Context(), token, err)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		}
+		return http.HandlerFunc(hfn)
+	}
+}
 
 func CheckAuth(key string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -58,7 +90,7 @@ func CheckAuth(key string) func(http.Handler) http.Handler {
 
 			if claims, ok := JWToken.Claims.(jwt.MapClaims); ok && JWToken.Valid {
 				// extract user, and user files
-				userName := claims["name"]
+				userName := claims["user"]
 				fmt.Print(userName)
 				ctx := context.WithValue(r.Context(), CtxAuthed, true)
 				ctx = context.WithValue(ctx, CtxUser, userName)
@@ -70,37 +102,34 @@ func CheckAuth(key string) func(http.Handler) http.Handler {
 	}
 }
 
-func NewJwtMiddleware(key string) *jwtmiddleware.JWTMiddleware {
-	return jwtmiddleware.New(jwtmiddleware.Options{
-		ValidationKeyGetter: func(token *jwt.Token) (interface{}, error) {
-			return key, nil
-		},
-		SigningMethod: jwt.SigningMethodHS256,
-	})
-}
-
-func NewToken(key, user string) func(http.Handler) http.Handler {
+func WithNewToken(key, user string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			token := jwt.New(jwt.SigningMethodHS256) // jwt.SigningMethodRS512
-
-			claims := make(jwt.MapClaims)
-			claims["admin"] = false
-			claims["name"] = user
-			claims["exp"] = time.Now().Add(time.Hour * 24).Unix() // settings.Get().JWTExpirationDelta
-			claims["iat"] = time.Now().Unix()
-			token.Claims = claims
-
-			// Sign the token
-			signedToken, err := token.SignedString([]byte(key))
+			signedToken, claims, err := NewSignedJWT(key, user)
 			if err != nil {
-				response.Error(w, 500, "couldn't sign")
+				response.Error(w, http.StatusInternalServerError, err.Error())
 				return
 			}
-
 			// Embed in context
 			ctx := context.WithValue(r.Context(), CtxToken, signedToken)
+			ctx = context.WithValue(ctx, CtxUser, claims["user"])
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// NewSignedJWT generates a new JWT, signs the input key and returns the result
+// along with the claims map and an error value.
+func NewSignedJWT(key, user string) (string, jwt.MapClaims, error) {
+	claims := jwt.MapClaims{
+		"user": user,
+		"exp":  time.Now().Add(time.Hour * 24).Unix(),
+		"iat":  time.Now().Unix(),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	// Sign the token
+	signedToken, err := token.SignedString([]byte(key))
+	return signedToken, claims, err
 }
