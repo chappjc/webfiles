@@ -9,13 +9,10 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/dgrijalva/jwt-go"
-
-	"github.com/go-chi/jwtauth"
-
 	"github.com/chappjc/webfiles/middleware"
-	"github.com/chappjc/webfiles/response"
 
+	"github.com/dgrijalva/jwt-go"
+	"github.com/go-chi/jwtauth"
 	"github.com/gorilla/sessions"
 )
 
@@ -26,7 +23,7 @@ func (s *Server) WithSession(next http.Handler) http.Handler {
 		// Get existing or create new session cookie
 		session, err := s.CookieStore.Get(r, "session")
 		if err != nil {
-			response.Error(w, 400, "session error")
+			http.Error(w, "session error", http.StatusInternalServerError)
 			return
 		}
 		ctx := context.WithValue(r.Context(), middleware.CtxSession, session)
@@ -41,7 +38,7 @@ func (s *Server) WithJWTCookie(next http.Handler) http.Handler {
 		// Get existing session cookie or make a new one
 		jwtCookie, err := s.CookieStore.Get(r, "webfilesJWTSession")
 		if err != nil && !os.IsNotExist(err) {
-			response.Error(w, 400, "session error: "+err.Error())
+			http.Error(w, "session error: "+err.Error(), http.StatusInternalServerError)
 			return
 		} else if os.IsNotExist(err) {
 			if jwtCookie.IsNew {
@@ -50,20 +47,37 @@ func (s *Server) WithJWTCookie(next http.Handler) http.Handler {
 				log.Errorf("Couldn't make a new session.")
 			}
 		}
+		// Save the session to generate it's ID
+		if err = jwtCookie.Save(r, w); err != nil {
+			log.Errorf("Failed to save JWT cookie: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
 		// Extract the JWT from the cookie, or embed a new one.
 		token, ok := jwtCookie.Values["JWTToken"].(string)
 		if !ok {
-			token, _, err = middleware.NewSignedJWT(s.SigningKey, jwtCookie.ID)
-			if err != nil {
-				log.Errorf("Failed to sign JWT: %v", err)
-				response.Error(w, http.StatusInternalServerError, err.Error())
-				return
+			// reuse validated JWT from jwtauth context, if available already
+			Token, _, err := jwtauth.FromContext(r.Context())
+			if err == nil && Token != nil && Token.Valid {
+				token = Token.Raw
+				log.Infof("Reusing token for session from jwtauth: %s", token)
+			} else {
+				// Generate new token
+				fmt.Println("ID: ", jwtCookie.ID)
+				token, _, err = middleware.NewSignedJWT(s.SigningKey, jwtCookie.ID)
+				if err != nil {
+					log.Errorf("Failed to sign JWT: %v", err)
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				log.Infof("Generating new token for session: %s", token)
 			}
+
+			// store the token string in the session cookie
 			jwtCookie.Values["JWTToken"] = token
-			log.Debugln("New token: ", token)
 		} else {
-			log.Debugln("Existing token: ", token)
+			log.Infof("Existing token from session cookie: %s", token)
 		}
 
 		JWToken, errParse := jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
@@ -75,19 +89,19 @@ func (s *Server) WithJWTCookie(next http.Handler) http.Handler {
 		})
 		if errParse != nil {
 			log.Errorf("Failed to parse signed JWT string: %v", errParse)
-			response.Error(w, http.StatusBadRequest, errParse.Error())
+			http.Error(w, errParse.Error(), http.StatusBadRequest)
 			return
 		}
 
 		// Save cookie store
 		if err = jwtCookie.Save(r, w); err != nil {
 			log.Errorf("Failed to save JWT cookie: %v", err)
-			response.Error(w, http.StatusInternalServerError, err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		// Patch the request with a "jwt" cookie for downstream processing.
-		if _, err = r.Cookie("jwt"); err != nil {
+		if _, err = r.Cookie("jwt"); err == http.ErrNoCookie {
 			r.AddCookie(sessions.NewCookie("jwt", token, jwtCookie.Options))
 		}
 

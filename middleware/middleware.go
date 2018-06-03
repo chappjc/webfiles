@@ -7,13 +7,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
-
-	"github.com/chappjc/webfiles/response"
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/go-chi/jwtauth"
+	"github.com/gorilla/sessions"
 	"github.com/sirupsen/logrus"
 )
 
@@ -37,14 +35,19 @@ func JWTAuthenticator(next http.Handler) http.Handler {
 		user := claims["user"]
 		fmt.Println("user: ", user)
 
-		next.ServeHTTP(w, r)
+		ctx := context.WithValue(r.Context(), CtxAuthed, true)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 // JWTVerify middleware verifies a JWT from sources defined via the findTokenFns
 // functions. If the jwtauth verification has already been successfully
-// performed for this request, the verifications functions are not run.
-func JWTVerify(ja *jwtauth.JWTAuth, findTokenFns ...func(r *http.Request) string) func(http.Handler) http.Handler {
+// performed for this request, the verifications functions are not run. If
+// injectJWTCookie is true, any located token will be injected as a request
+// cookie, "jwt" so that the session cookie middleware may reuse it. If not
+// injecting a cookie into the request, cookieOpts may be nil.
+func JWTVerify(ja *jwtauth.JWTAuth, injectJWTCookie bool, cookieOpts *sessions.Options,
+	findTokenFns ...func(r *http.Request) string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		hfn := func(w http.ResponseWriter, r *http.Request) {
 			// Skip additional verification if already done
@@ -56,65 +59,14 @@ func JWTVerify(ja *jwtauth.JWTAuth, findTokenFns ...func(r *http.Request) string
 			// Perform JWT verfication and store the token and result in the
 			// request context.
 			token, err = jwtauth.VerifyRequest(ja, r, findTokenFns...)
+			if err == nil && token != nil && injectJWTCookie && cookieOpts != nil {
+				r.AddCookie(sessions.NewCookie("jwt", token.Raw, cookieOpts))
+			}
+
 			ctx := jwtauth.NewContext(r.Context(), token, err)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		}
 		return http.HandlerFunc(hfn)
-	}
-}
-
-func CheckAuth(key string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-			authHeader := r.Header.Get("Authorization")
-			if !strings.HasPrefix(authHeader, "Bearer ") {
-				ctx := context.WithValue(r.Context(), CtxAuthed, false)
-				next.ServeHTTP(w, r.WithContext(ctx))
-				return
-			}
-
-			apitoken := strings.TrimPrefix(authHeader, "Bearer ")
-			JWToken, err := jwt.Parse(apitoken, func(token *jwt.Token) (interface{}, error) {
-				// validate signing algorithm
-				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-					return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
-				}
-				return []byte(key), nil
-			})
-			if err != nil {
-				ctx := context.WithValue(r.Context(), CtxAuthed, false)
-				next.ServeHTTP(w, r.WithContext(ctx))
-				return
-			}
-
-			if claims, ok := JWToken.Claims.(jwt.MapClaims); ok && JWToken.Valid {
-				// extract user, and user files
-				userName := claims["user"]
-				fmt.Print(userName)
-				ctx := context.WithValue(r.Context(), CtxAuthed, true)
-				ctx = context.WithValue(ctx, CtxUser, userName)
-				next.ServeHTTP(w, r.WithContext(ctx))
-				return
-			}
-
-		})
-	}
-}
-
-func WithNewToken(key, user string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			signedToken, claims, err := NewSignedJWT(key, user)
-			if err != nil {
-				response.Error(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			// Embed in context
-			ctx := context.WithValue(r.Context(), CtxToken, signedToken)
-			ctx = context.WithValue(ctx, CtxUser, claims["user"])
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
 	}
 }
 

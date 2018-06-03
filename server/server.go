@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"github.com/chappjc/webfiles/response"
 
 	"github.com/OneOfOne/xxhash"
+	"github.com/go-chi/chi"
 	"github.com/go-chi/jwtauth"
 	"github.com/gorilla/sessions"
 	"github.com/sirupsen/logrus"
@@ -36,7 +38,7 @@ const (
 	uploadPostParam  = "fileupload"
 )
 
-// Server manages cookies/auth, and provides the http handlers
+// Server manages cookies/auth, and implements the http handlers
 type Server struct {
 	CookieStore *sessions.FilesystemStore
 	AuthToken   *jwtauth.JWTAuth
@@ -69,11 +71,39 @@ func (s *Server) root(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, "webfiles is running!")
 }
 
+// File is the handler for file downloads, requiring the "{fileid}" URL path
+// parameter (e.g. /file/{fileid}).
 func (s *Server) File(w http.ResponseWriter, r *http.Request) {
-	// get file id
-	// check token
-	// serve file
-	response.WritePlainText(w, "file")
+	// Extract the file's unique id from the path
+	fileID := chi.URLParam(r, "fileid")
+
+	// Verify authentication
+	if !middleware.RequestCtxAuthed(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Check token
+	token := middleware.RequestCtxToken(r)
+	if !s.FileAuthCheck(fileID, token) {
+		http.Error(w, "unauthorized for file "+fileID, http.StatusUnauthorized)
+		return
+	}
+
+	// Locate file in storage by it's UID
+	fullFile, statusCode, err := s.UIDToFilePath(fileID, false)
+	if err != nil {
+		log.Errorln(err)
+		http.Error(w, err.Error(), statusCode)
+		return
+	}
+
+	// Send the file
+	if err = response.SendFile(w, fullFile); err != nil {
+		log.Errorln(err)
+		http.Error(w, err.Error(), statusCode)
+		return
+	}
 }
 
 func (s *Server) FileList(w http.ResponseWriter, r *http.Request) {
@@ -81,11 +111,16 @@ func (s *Server) FileList(w http.ResponseWriter, r *http.Request) {
 	// serve file list
 }
 
+func (s *Server) FileAuthCheck(fileID, token string) bool {
+	// check with user-file DB
+	return true
+}
+
 // Token returns the user/session's current JWT.
 func (s *Server) Token(w http.ResponseWriter, r *http.Request) {
 	userJWT := middleware.RequestCtxToken(r)
 	if userJWT == "" {
-		response.Error(w, http.StatusInternalServerError, "JWT not available")
+		http.Error(w, "JWT not available", http.StatusInternalServerError)
 		return
 	}
 	response.WritePlainText(w, userJWT)
@@ -97,7 +132,7 @@ func (s *Server) UploadFile(w http.ResponseWriter, r *http.Request) {
 	session := middleware.RequestCtxJWTSession(r)
 	userJWT := middleware.RequestCtxToken(r)
 	if session == nil || userJWT == "" {
-		response.Error(w, http.StatusInternalServerError, "JWT not available")
+		http.Error(w, "JWT not available", http.StatusInternalServerError)
 		return
 	}
 	fmt.Println("session ID for upload: ", session.ID)
@@ -105,35 +140,36 @@ func (s *Server) UploadFile(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	// POST
 	case http.MethodPost:
-		// V
+		// Get media type from Content-Type header
 		contentType := r.Header.Get("Content-Type")
-		mediaType, params, err := mime.ParseMediaType(contentType)
+		mediaType, _, err := mime.ParseMediaType(contentType)
 		if err != nil {
-			response.Error(w, http.StatusUnsupportedMediaType,
-				"file upload Content-Type request must be multipart/form-data")
+			http.Error(w, "file upload Content-Type request must be multipart/form-data",
+				http.StatusUnsupportedMediaType)
 			return
 		}
-		log.Debugln(params)
 
+		// Ensure it is a multipart/... media type
 		if !strings.HasPrefix(mediaType, "multipart/") {
-			response.Error(w, http.StatusBadRequest, "invalid Content-Type "+mediaType)
+			http.Error(w, "invalid Content-Type "+mediaType, http.StatusBadRequest)
 		}
 
 		// Process the multipart.File upload
 		mpFile, fileHeader, err := s.formFile(uploadPostParam, r)
 		if err != nil {
-			response.Error(w, http.StatusBadRequest, err.Error())
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		defer mpFile.Close()
 
-		// Compute UID of file
+		// Compute UID of file. Use a non-cryptographic hash function for speed.
 		hasher := xxhash.New64()
 		numBytes, err := io.Copy(hasher, mpFile)
 		if err != nil {
-			response.Error(w, http.StatusInternalServerError, err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		// UID is a 16 character hex string (8 bytes of data)
 		UID := fmt.Sprintf("%016x", hasher.Sum64())
 		log.Infof("Hashed %d bytes. UID: %s", numBytes, UID)
 
@@ -142,49 +178,94 @@ func (s *Server) UploadFile(w http.ResponseWriter, r *http.Request) {
 			log.Errorln(err)
 		}
 
-		// Copy file to storage folder
+		// Copy file to storage folder, creating the folder first.
 		fullPath, _ := filepath.Abs(filepath.Join(s.FilesPath, UID))
 		if err = os.MkdirAll(fullPath, 0755); err != nil {
 			log.Errorln(err)
-			response.Error(w, http.StatusInternalServerError, err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
+		// Combine path and file name, then sanitize it.
 		fullFile := filepath.Join(fullPath, fileHeader.Filename)
-		fullFile = filepath.Clean(fullFile)
+		fullFile = filepath.Clean(fullFile) // eliminates ".."
+		// Do not allow user to write outside of storage path.
 		if !strings.HasPrefix(fullFile, fullPath) {
-			response.Error(w, http.StatusBadRequest, os.ErrPermission.Error())
+			http.Error(w, os.ErrPermission.Error(), http.StatusBadRequest)
 			return
 		}
 
+		// Copy upload to storage folder
 		fid, err := os.OpenFile(fullFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 		if err != nil {
 			log.Errorln(err)
-			response.Error(w, http.StatusInternalServerError, err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		defer fid.Close()
 
-		numBytes, err = io.Copy(fid, mpFile)
+		numBytesStored, err := io.Copy(fid, mpFile)
 		if err != nil {
 			log.Errorln(err)
-			response.Error(w, http.StatusInternalServerError, err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		log.Infof("Wrote %d bytes: %s", numBytes, fullFile)
+		if numBytesStored != numBytes {
+			log.Errorf("File %d not stored completely. %d B hashed, %d B copied",
+				fullFile, numBytes, numBytesStored)
+		}
+
+		// Store the original file name in a text file "NAME".
+		err = ioutil.WriteFile(filepath.Join(fullPath, "NAME"),
+			[]byte(fileHeader.Filename), 0644)
+		if err != nil {
+			log.Errorln(err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
 		// Write success response to user
-		resp := &response.Upload{
-			UID:      UID,
-			FileName: fileHeader.Filename,
-			Size:     numBytes,
+		resp := &response.UploadResponse{
+			Upload: response.Upload{
+				UID:      UID,
+				FileName: fileHeader.Filename,
+				Size:     numBytes,
+			},
+			Token: userJWT,
 		}
 		response.WriteJSON(w, resp, "    ")
 
 	default:
-		response.Error(w, 400, "must be POST")
+		http.Error(w, "must be POST", http.StatusMethodNotAllowed)
 		return
 	}
+}
+
+// UIDToFilePath looks up the file name for the file with unique identifier UID,
+// and returns the absolute path to the files, a http status code, and an error.
+func (s *Server) UIDToFilePath(UID string, mkdir bool) (string, int, error) {
+	// Get full path to file in storage location
+	fullPath, _ := filepath.Abs(filepath.Join(s.FilesPath, UID))
+	if mkdir {
+		if err := os.MkdirAll(fullPath, 0755); err != nil {
+			return "", http.StatusInternalServerError, err
+		}
+		// TODO if existed, return notfound error
+	}
+
+	// Get original name of file
+	fName, err := ioutil.ReadFile(filepath.Join(fullPath, "NAME"))
+	if err != nil || len(fName) == 0 {
+		log.Errorf("NAME file in %d unreadable: %v", fullPath, err)
+		return "", http.StatusInternalServerError, err
+	}
+
+	fullFile := filepath.Join(fullPath, string(fName))
+	fullFile = filepath.Clean(fullFile)
+	if !strings.HasPrefix(fullFile, fullPath) {
+		return "", http.StatusBadRequest, os.ErrPermission
+	}
+	return fullFile, http.StatusOK, nil
 }
 
 var multipartByReader = &multipart.Form{
@@ -192,6 +273,10 @@ var multipartByReader = &multipart.Form{
 	File:  make(map[string][]*multipart.FileHeader),
 }
 
+// formFile gets the file for the given key (e.g. "fileupload") from the
+// request's parsed multipart form, calling ParseMultipartForm first if
+// necessary. On success, a non-nil multipart.File and multipart.FileHeader are
+// returned, but the error must be checked to ensure it was opened successfully.
 func (s *Server) formFile(key string, r *http.Request) (multipart.File, *multipart.FileHeader, error) {
 	if r.MultipartForm == multipartByReader {
 		return nil, nil, errors.New("http: multipart handled by MultipartReader")
