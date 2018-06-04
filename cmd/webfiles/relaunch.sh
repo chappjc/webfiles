@@ -4,8 +4,9 @@
 # git, build, and launch,
 
 echo 'Stopping webfiles...'
-killall -w -s INT webfiles
+killall -s INT webfiles
 sleep 1
+killall -w -s TERM webfiles
 
 echo 'Rebuilding...'
 cd $GOPATH/src/github.com/chappjc/webfiles
