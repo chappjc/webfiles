@@ -72,12 +72,12 @@ func (t *SiteTemplates) ExecTemplate(w http.ResponseWriter, name string, data in
 }
 
 func makeTemplateFuncMap() template.FuncMap {
-	return template.FuncMap{
-		// "add": func(a int64, b int64) int64 {
-		// 	return a + b
-		// },
-		// "subtract": func(a int64, b int64) int64 {
-		// 	return a - b
-		// },
-	}
+	return template.FuncMap{}
+	// Example functions:
+	// "add": func(a int64, b int64) int64 {
+	// 	return a + b
+	// },
+	// "subtract": func(a int64, b int64) int64 {
+	// 	return a - b
+	// },
 }
