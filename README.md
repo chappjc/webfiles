@@ -15,15 +15,15 @@ CI configuration is included.
 - Download a file via the file's unique identifier.
 - User authentication is handled with JWT tokens.
 - Tokens are generated automatically if one is not provided.
-- Tokens may be provided any of: (1) URL query such as `?jwt={the token}`, (2)
-  HTTP Authorization (Bearer) header, or (3) a cookie named "jwt".
+- Tokens may be provided by any of: (1) URL query such as `?jwt={the token}`,
+  (2) HTTP Authorization (Bearer) header, or (3) a cookie named "jwt".
 - Includes a script, relaunch.sh, that works well with webhooks to pull changes
   from git, build, and restart webfiles.
 
-### URL Paths
+### Endpoints
 
 - `/` - A basic HTML page with a file selection dialog for uploading.
-- `/token` - Show your current JWT token, which can be used to identifier yourself.
+- `/token` - Shows your current JWT token, which can be used to identify yourself.
 - `/upload` - The file upload path, POST only. Response is JSON including file's
   UID and the user's current JWT.
 - `/user-files` - Shows all files associated with you in a JSON array of file
