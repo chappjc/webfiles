@@ -10,3 +10,5 @@ debug
 *.out
 uploads/
 session_*
+cmd/webfiles/webfiles
+

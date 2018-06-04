@@ -4,7 +4,7 @@
 # git, build, and launch,
 
 echo 'Stopping webfiles...'
-killall -w -INT webfiles
+killall -w -s INT webfiles
 sleep 1
 
 echo 'Rebuilding...'
