@@ -45,6 +45,7 @@ type Server struct {
 	SigningKey  string
 	MaxFileSize int64
 	FilesPath   string
+	Templates   *SiteTemplates
 }
 
 // NewServer creates a new Server for the given signing secret, cookie storage
@@ -64,11 +65,25 @@ func NewServer(secret, cookieStorePath string, maxFileSize int64) *Server {
 	opts.HttpOnly = true
 	opts.Secure = false // for HTTPS-only, set true
 
+	templateNames := []string{"root"}
+	tmpls, err := NewTemplates("views", templateNames, MakeTemplateFuncMap())
+	if err != nil {
+		log.Errorf("Failed to parse templates: %v", err)
+		return nil
+	}
+	server.Templates = tmpls
+
 	return server
 }
 
 func (s *Server) root(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprint(w, "webfiles is running!")
+	d, err := s.Templates.ExecTemplateToString("root", nil)
+	if err != nil {
+		log.Errorf("Execute template failed: %v", err)
+		http.Error(w, "execute template failed", http.StatusInternalServerError)
+		return
+	}
+	response.WriteHTML(w, d)
 }
 
 // File is the handler for file downloads, requiring the "{fileid}" URL path
@@ -135,7 +150,6 @@ func (s *Server) UploadFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "JWT not available", http.StatusInternalServerError)
 		return
 	}
-	fmt.Println("session ID for upload: ", session.ID)
 
 	switch r.Method {
 	// POST
@@ -187,7 +201,7 @@ func (s *Server) UploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Combine path and file name, then sanitize it.
-		fullFile := filepath.Join(fullPath, fileHeader.Filename)
+		fullFile := filepath.Join(fullPath, filepath.Base(fileHeader.Filename))
 		fullFile = filepath.Clean(fullFile) // eliminates ".."
 		// Do not allow user to write outside of storage path.
 		if !strings.HasPrefix(fullFile, fullPath) {
@@ -211,7 +225,7 @@ func (s *Server) UploadFile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if numBytesStored != numBytes {
-			log.Errorf("File %d not stored completely. %d B hashed, %d B copied",
+			log.Errorf("File %s not stored completely. %d B hashed, %d B copied",
 				fullFile, numBytes, numBytesStored)
 		}
 
@@ -256,7 +270,7 @@ func (s *Server) UIDToFilePath(UID string, mkdir bool) (string, int, error) {
 	// Get original name of file
 	fName, err := ioutil.ReadFile(filepath.Join(fullPath, "NAME"))
 	if err != nil || len(fName) == 0 {
-		log.Errorf("NAME file in %d unreadable: %v", fullPath, err)
+		log.Errorf("NAME file in %s unreadable: %v", fullPath, err)
 		return "", http.StatusInternalServerError, err
 	}
 

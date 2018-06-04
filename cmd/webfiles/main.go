@@ -54,6 +54,9 @@ func _main() error {
 
 	// Construct the Server and path multiplexer.
 	svr := server.NewServer(*signingKey, cookieStore, *maxFileSize)
+	if svr == nil {
+		return fmt.Errorf("failed to create server")
+	}
 	webMux := server.NewRouter(svr)
 
 	log.Infof("webfiles is listening on http://%s.", *listen)

@@ -59,7 +59,14 @@ func JWTVerify(ja *jwtauth.JWTAuth, injectJWTCookie bool, cookieOpts *sessions.O
 			// Perform JWT verfication and store the token and result in the
 			// request context.
 			token, err = jwtauth.VerifyRequest(ja, r, findTokenFns...)
-			if err == nil && token != nil && injectJWTCookie && cookieOpts != nil {
+			if err != nil || token == nil || token.Valid {
+				// No valid token. Continue request processing.
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Inject cookie, update context, and continue request processing
+			if injectJWTCookie && cookieOpts != nil {
 				r.AddCookie(sessions.NewCookie("jwt", token.Raw, cookieOpts))
 			}
 
@@ -68,6 +75,17 @@ func JWTVerify(ja *jwtauth.JWTAuth, injectJWTCookie bool, cookieOpts *sessions.O
 		}
 		return http.HandlerFunc(hfn)
 	}
+}
+
+// JWTParse parses the input token string and validates it with the input key.
+func JWTParse(token, key string) (*jwt.Token, error) {
+	return jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
+		// validate signing algorithm
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(key), nil
+	})
 }
 
 // NewSignedJWT generates a new JWT, signs the input key and returns the result

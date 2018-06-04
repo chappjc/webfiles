@@ -1,0 +1,17 @@
+{{define "root"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>webfiles - simple upload/download server</title>
+  <link rel="icon" href="https://www.magicleap.com/static/icons/favicon-32x32.png">
+</head>
+<body>
+<p><strong>Please choose a file to upload:</strong></p>
+<form action="/upload" method="post" enctype="multipart/form-data">
+    <label for="file">File:</label>
+    <input type="file" name="fileupload" id="file" />
+    <input type="submit" name="Upload" value="Submit" />
+</form>
+</body>
+</html>
+{{end}}
