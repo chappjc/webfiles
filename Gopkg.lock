@@ -8,10 +8,29 @@
   version = "v1.2.2"
 
 [[projects]]
+  name = "github.com/asdine/storm"
+  packages = [
+    ".",
+    "codec",
+    "codec/json",
+    "index",
+    "internal",
+    "q"
+  ]
+  revision = "bda68dab90fc908ee5dbccb36400edf4f54972d6"
+  version = "v2.1.1"
+
+[[projects]]
   branch = "master"
   name = "github.com/chappjc/logrus-prefix"
   packages = ["."]
   revision = "3a1d64819adb569fb9952144dd90c0abe92e2822"
+
+[[projects]]
+  name = "github.com/coreos/bbolt"
+  packages = ["."]
+  revision = "583e8937c61f1af6513608ccc75c97b6abdf4ff9"
+  version = "v1.3.0"
 
 [[projects]]
   name = "github.com/dgrijalva/jwt-go"
@@ -100,6 +119,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "ce469fdbee7eb6211c690bde0acbfc09b964efe5252df665acdd5b261030c03c"
+  inputs-digest = "679838485dbb3bc3a9c41048c3908357f02cb7a2a214aafc471523178fbc6d93"
   solver-name = "gps-cdcl"
   solver-version = 1

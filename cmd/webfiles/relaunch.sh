@@ -20,6 +20,7 @@ fi
 git checkout master
 git pull --ff-only origin master
 #SHORTREV=$(git rev-parse --short HEAD)
+$GOPATH/bin/dep ensure
 cd cmd/webfiles
 go build
 
