@@ -49,6 +49,7 @@ func NewRouter(server *Server) WebMux {
 	mux.Get("/", server.root)
 	mux.Get("/token", server.Token)
 	mux.HandleFunc("/upload", server.UploadFile)
-	mux.With(middleware.JWTAuthenticator).Get("/file/{fileid}", server.File)
+	mux.With(middleware.JWTAuthenticator, server.WithUserFileAuthz).Get("/file/{fileid}", server.File)
+	mux.With(middleware.JWTAuthenticator).Get("/user-files", server.FileList)
 	return WebMux{mux}
 }

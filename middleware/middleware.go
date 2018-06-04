@@ -32,10 +32,11 @@ func JWTAuthenticator(next http.Handler) http.Handler {
 			return
 		}
 
-		user := claims["user"]
+		user := claims["user"].(string)
 		fmt.Println("user: ", user)
 
 		ctx := context.WithValue(r.Context(), CtxAuthed, true)
+		ctx = context.WithValue(ctx, CtxUser, user)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -56,7 +57,7 @@ func JWTVerify(ja *jwtauth.JWTAuth, injectJWTCookie bool, cookieOpts *sessions.O
 				next.ServeHTTP(w, r)
 				return
 			}
-			// Perform JWT verfication and store the token and result in the
+			// Perform JWT verification and store the token and result in the
 			// request context.
 			token, err = jwtauth.VerifyRequest(ja, r, findTokenFns...)
 			if err != nil || token == nil || token.Valid {
@@ -70,7 +71,11 @@ func JWTVerify(ja *jwtauth.JWTAuth, injectJWTCookie bool, cookieOpts *sessions.O
 				r.AddCookie(sessions.NewCookie("jwt", token.Raw, cookieOpts))
 			}
 
+			user := token.Claims.(jwt.MapClaims)["user"].(string)
+			fmt.Println("user: ", user)
+
 			ctx := jwtauth.NewContext(r.Context(), token, err)
+			ctx = context.WithValue(ctx, CtxUser, user)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		}
 		return http.HandlerFunc(hfn)
@@ -93,7 +98,7 @@ func JWTParse(token, key string) (*jwt.Token, error) {
 func NewSignedJWT(key, user string) (string, jwt.MapClaims, error) {
 	claims := jwt.MapClaims{
 		"user": user,
-		"exp":  time.Now().Add(time.Hour * 24).Unix(),
+		"exp":  time.Now().Add(time.Hour * 24 * 365).Unix(),
 		"iat":  time.Now().Unix(),
 	}
 

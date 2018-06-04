@@ -12,6 +12,7 @@ const (
 	CtxToken contextKey = iota
 	CtxUser
 	CtxAuthed
+	CtxAuthzed
 	CtxSession
 	CtxJWTCookie
 )
@@ -34,6 +35,16 @@ func RequestCtxAuthed(r *http.Request) bool {
 		return false
 	}
 	return authed
+}
+
+// RequestCtxAuthzed extracts the CtxAuthzed value from the request context.
+func RequestCtxAuthzed(r *http.Request) bool {
+	authzed, ok := r.Context().Value(CtxAuthzed).(bool)
+	if !ok {
+		log.Debugf("CtxAuthzed not embedded in request context.")
+		return false
+	}
+	return authzed
 }
 
 // RequestCtxUser extracts the CtxUser value from the request context.

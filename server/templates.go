@@ -12,16 +12,21 @@ import (
 	"path/filepath"
 )
 
+// PageTemplate associates a template file with an http/template.Template
 type PageTemplate struct {
 	file     string
 	template *template.Template
 }
 
+// SiteTemplates contains all of the PageTemplates used by webfiles, as well as
+// the template.FuncMap used in their execution.
 type SiteTemplates struct {
 	pageTemplates map[string]PageTemplate
 	helpers       template.FuncMap
 }
 
+// NewTemplates parses all of the named templates in the given folder. The file
+// names are obtained by concatenating ".tmpl" to the tamplate name.
 func NewTemplates(folder string, names []string, helpers template.FuncMap) (*SiteTemplates, error) {
 	templ := &SiteTemplates{
 		pageTemplates: make(map[string]PageTemplate),
@@ -66,7 +71,7 @@ func (t *SiteTemplates) ExecTemplate(w http.ResponseWriter, name string, data in
 	return fmt.Errorf("unknown template %s", name)
 }
 
-func MakeTemplateFuncMap() template.FuncMap {
+func makeTemplateFuncMap() template.FuncMap {
 	return template.FuncMap{
 		// "add": func(a int64, b int64) int64 {
 		// 	return a + b

@@ -16,10 +16,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/asdine/storm/q"
+
 	"github.com/chappjc/webfiles/middleware"
 	"github.com/chappjc/webfiles/response"
 
 	"github.com/OneOfOne/xxhash"
+	"github.com/asdine/storm"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/jwtauth"
 	"github.com/gorilla/sessions"
@@ -40,24 +43,38 @@ const (
 
 // Server manages cookies/auth, and implements the http handlers
 type Server struct {
-	CookieStore *sessions.FilesystemStore
-	AuthToken   *jwtauth.JWTAuth
-	SigningKey  string
-	MaxFileSize int64
-	FilesPath   string
-	Templates   *SiteTemplates
+	CookieStore   *sessions.FilesystemStore
+	AuthToken     *jwtauth.JWTAuth
+	SigningKey    string
+	MaxFileSize   int64
+	FilesPath     string
+	Templates     *SiteTemplates
+	UserFileStore *storm.DB
+}
+
+// UserFileStoreItem is the type in the storm user-file DB.
+type UserFileStoreItem struct {
+	RowID  int    `storm:"id,increment"`
+	User   string `storm:"index"`
+	FileID int64  `storm:"index"`
 }
 
 // NewServer creates a new Server for the given signing secret, cookie storage
 // file system path, and uploaded file size limit.
-func NewServer(secret, cookieStorePath string, maxFileSize int64) *Server {
+func NewServer(secret, cookieStorePath string, maxFileSize int64) (*Server, error) {
+	userFileDB, err := storm.Open("./userdb")
+	if err != nil {
+		return nil, fmt.Errorf("failed storm.Open: %v", err)
+	}
+
 	shaSum := sha256.Sum256([]byte(secret))
 	server := &Server{
-		SigningKey:  secret,
-		CookieStore: sessions.NewFilesystemStore(cookieStorePath, shaSum[:]),
-		AuthToken:   jwtauth.New("HS256", []byte(secret), nil),
-		MaxFileSize: maxFileSize,
-		FilesPath:   defaultFilesPath,
+		SigningKey:    secret,
+		CookieStore:   sessions.NewFilesystemStore(cookieStorePath, shaSum[:]),
+		AuthToken:     jwtauth.New("HS256", []byte(secret), nil),
+		MaxFileSize:   maxFileSize,
+		FilesPath:     defaultFilesPath,
+		UserFileStore: userFileDB,
 	}
 
 	opts := server.CookieStore.Options
@@ -66,14 +83,51 @@ func NewServer(secret, cookieStorePath string, maxFileSize int64) *Server {
 	opts.Secure = false // for HTTPS-only, set true
 
 	templateNames := []string{"root"}
-	tmpls, err := NewTemplates("views", templateNames, MakeTemplateFuncMap())
+	tmpls, err := NewTemplates("views", templateNames, makeTemplateFuncMap())
 	if err != nil {
-		log.Errorf("Failed to parse templates: %v", err)
-		return nil
+		return nil, fmt.Errorf("failed to parse templates: %v", err)
 	}
 	server.Templates = tmpls
 
-	return server
+	return server, nil
+}
+
+// Shutdown cleanly shutsdown the Server
+func (s *Server) Shutdown() error {
+	return s.UserFileStore.Close()
+}
+
+// storeUserFileMapping stores the input user-fileid mapping in the on-disk DB.
+func (s *Server) storeUserFileMapping(user string, fileID uint64) error {
+	u := &UserFileStoreItem{
+		User:   user,
+		FileID: int64(fileID),
+	}
+	numExisting, err := s.UserFileStore.Select(q.Eq("User", u.User), q.Eq("FileID", u.FileID)).Count(u)
+	if err != nil {
+		log.Warnf("Failed to query for existing records: %v", err)
+	}
+	if numExisting > 0 {
+		log.Debugf("Existing record found: %s, %x", u.User, u.FileID)
+		return nil
+	}
+	return s.UserFileStore.Save(u)
+}
+
+// retrieveFileIDsByUser retrieves a slice of file IDs for the specified user
+// from the on-disk DB.
+func (s *Server) retrieveFileIDsByUser(user string) ([]int64, error) {
+	var mappings []UserFileStoreItem
+	err := s.UserFileStore.Find("User", user, &mappings)
+	if err != nil {
+		return nil, err
+	}
+
+	FileIDs := make([]int64, 0, len(mappings))
+	for i := range mappings {
+		FileIDs = append(FileIDs, mappings[i].FileID)
+	}
+	return FileIDs, err
 }
 
 func (s *Server) root(w http.ResponseWriter, r *http.Request) {
@@ -98,9 +152,8 @@ func (s *Server) File(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check token
-	token := middleware.RequestCtxToken(r)
-	if !s.FileAuthCheck(fileID, token) {
+	// Check authorization
+	if !middleware.RequestCtxAuthzed(r) {
 		http.Error(w, "unauthorized for file "+fileID, http.StatusUnauthorized)
 		return
 	}
@@ -121,14 +174,23 @@ func (s *Server) File(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// FileList generates a response containing a JSON array of file UIDs that the
+// user is permitted to access.
 func (s *Server) FileList(w http.ResponseWriter, r *http.Request) {
-	// check token
-	// serve file list
-}
+	// Lookup files associated with this user
+	user := middleware.RequestCtxUser(r)
+	userFileIDs, err := s.retrieveFileIDsByUser(user)
+	if err != nil {
+		log.Infof("failed to retrieve file UIDs for user %s (no files uploaded?): %v", user, err)
+		response.WriteJSON(w, []string{}, "")
+		return
+	}
 
-func (s *Server) FileAuthCheck(fileID, token string) bool {
-	// check with user-file DB
-	return true
+	hexFileIDs := make([]string, 0, len(userFileIDs))
+	for _, fileID := range userFileIDs {
+		hexFileIDs = append(hexFileIDs, fmt.Sprintf("%016x", fileID))
+	}
+	response.WriteJSON(w, hexFileIDs, "    ")
 }
 
 // Token returns the user/session's current JWT.
@@ -184,7 +246,8 @@ func (s *Server) UploadFile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// UID is a 16 character hex string (8 bytes of data)
-		UID := fmt.Sprintf("%016x", hasher.Sum64())
+		uid := hasher.Sum64()
+		UID := fmt.Sprintf("%016x", uid)
 		log.Infof("Hashed %d bytes. UID: %s", numBytes, UID)
 
 		_, err = mpFile.Seek(0, io.SeekStart)
@@ -236,6 +299,12 @@ func (s *Server) UploadFile(w http.ResponseWriter, r *http.Request) {
 			log.Errorln(err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+
+		// Register this file with the user
+		user := middleware.RequestCtxUser(r)
+		if err = s.storeUserFileMapping(user, uid); err != nil {
+			log.Errorf("Failed to store user-file mapping [%s,%d]: %v", user, uid, err)
 		}
 
 		// Write success response to user

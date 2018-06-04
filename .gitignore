@@ -11,4 +11,4 @@ debug
 uploads/
 session_*
 cmd/webfiles/webfiles
-
+cmd/webfiles/userdb

@@ -7,9 +7,11 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/chappjc/webfiles/middleware"
 
+	"github.com/go-chi/chi"
 	"github.com/go-chi/jwtauth"
 	"github.com/gorilla/sessions"
 )
@@ -25,6 +27,37 @@ func (s *Server) WithSession(next http.Handler) http.Handler {
 			return
 		}
 		ctx := context.WithValue(r.Context(), middleware.CtxSession, session)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// WithUserFileAuthz checks the permission of CtxUser for the file being accessed.
+func (s *Server) WithUserFileAuthz(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Lookup files associated with this user
+		user := middleware.RequestCtxUser(r)
+		userFileIDs, err := s.retrieveFileIDsByUser(user)
+		if err != nil {
+			log.Infof("failed to retrieve file UIDs for user %s (no files uploaded?): %v", user, err)
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Extract the file's unique id from the path
+		fileID := chi.URLParam(r, "fileid")
+		uid, err := strconv.ParseUint(fileID, 16, 64)
+		if err != nil {
+			log.Errorf("failed to decode UID %s: %v", fileID, err)
+			next.ServeHTTP(w, r)
+		}
+
+		for _, id := range userFileIDs {
+			if id == int64(uid) {
+				break
+			}
+		}
+
+		ctx := context.WithValue(r.Context(), middleware.CtxAuthzed, true)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -120,6 +153,7 @@ func (s *Server) WithJWTCookie(next http.Handler) http.Handler {
 		// Inject session and JWT in request context.
 		ctx := context.WithValue(r.Context(), middleware.CtxJWTCookie, jwtCookie)
 		ctx = context.WithValue(ctx, middleware.CtxToken, token)
+		ctx = context.WithValue(ctx, middleware.CtxUser, jwtCookie.ID)
 		ctx = jwtauth.NewContext(ctx, JWToken, errParse)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
