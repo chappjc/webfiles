@@ -23,5 +23,4 @@ cd cmd/webfiles
 go build
 
 echo 'Launching!'
-./webfiles
-
+./webfiles &
