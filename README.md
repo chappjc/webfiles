@@ -16,8 +16,11 @@ CI configuration is included.
 - Download a file via the file's unique identifier.
 - User authentication is handled with JWT tokens.
 - Tokens are generated automatically if one is not provided.
+- A persistent server-side store is used to keep sessions valid between restarts of webfiles.
 - Tokens may be provided by any of: (1) URL query such as `?jwt={the token}`,
-  (2) HTTP Authorization (Bearer) header, or (3) a cookie named "jwt".
+  (2) HTTP Authorization (Bearer) header, or (3) a cookie named "jwt".  They are
+  valid only if they were signed by the server.
+- User to file association is managed with a Bolt DB.
 - Includes a script, relaunch.sh, that works well with webhooks to pull changes
   from git, build, and restart webfiles.
 
@@ -31,6 +34,29 @@ CI configuration is included.
   UIDs. User authentication via JWT.
 - `/file/{fileid}` - The file download path. Requires user authorization.
 
+### Example
+
+Instead of uploading from your web browser, which has no progress indicator presently, you can use `curl` as follows:
+
+```bash
+curl https://deploy.site.you/upload -F "fileupload=@UX490UAR-AS.302"
+```
+
+The response:
+```json
+{
+    "file": {
+        "uid": "4b361b653e78c342",
+        "file_name": "UX490UAR-AS.302",
+        "file_size": 6488064
+    },
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE1NTk2Mzc2NzIsImlhdCI6MTUyODEwMTY3MiwidXNlciI6IjU3NUhNMjVXSjZLWUVESDI1R0E1M0NGVk41SVJGVlNLUkU0MzJFMjRDUERVT05CR1NKR0EifQ.K6AjhrnT0sJay9NyrQvCKvjnhrk9Hanic-86EtknetA"
+}
+```
+
+The `"uid"` field is used with the `/file/{fileid}` endpoint to download the
+file. The `"token"` field contains the JWT associated to the user at time of
+upload. This token is required to download the file.
 
 ## Requirements
 
