@@ -2,6 +2,7 @@
 
 [![GoDoc](https://godoc.org/github.com/chappjc/webfiles?status.svg)](https://godoc.org/github.com/chappjc/webfiles)
 [![Go Report Card](https://goreportcard.com/badge/github.com/chappjc/webfiles)](https://goreportcard.com/report/github.com/chappjc/webfiles)
+[![Build Status](https://travis-ci.org/chappjc/webfiles.svg?branch=master)](https://travis-ci.org/chappjc/webfiles)
 
 webfiles is a simple file server with some fun features.
 
